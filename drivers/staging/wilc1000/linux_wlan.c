@@ -31,7 +31,7 @@ static struct notifier_block g_dev_notifier = {
 	.notifier_call = dev_state_ev_handler
 };
 
-static struct semaphore close_exit_sync;
+static struct completion close_exit_sync;
 
 static int wlan_deinit_locks(struct net_device *dev);
 static void wlan_deinitialize_threads(struct net_device *dev);
@@ -1088,7 +1088,7 @@ int wilc_mac_close(struct net_device *ndev)
 		WILC_WFI_deinit_mon_interface();
 	}
 
-	up(&close_exit_sync);
+	complete(&close_exit_sync);
 	vif->mac_opened = 0;
 
 	return 0;
@@ -1232,7 +1232,8 @@ void wilc_netdev_cleanup(struct wilc *wilc)
 	}
 
 	if (wilc && (wilc->vif[0]->ndev || wilc->vif[1]->ndev)) {
-		wilc_lock_timeout(wilc, &close_exit_sync, 5 * 1000);
+		wait_for_completion_timeout(&close_exit_sync,
+						msecs_to_jiffies(5000));
 
 		for (i = 0; i < NUM_CONCURRENT_IFC; i++)
 			if (wilc->vif[i]->ndev)
@@ -1258,7 +1259,7 @@ int wilc_netdev_init(struct wilc **wilc, struct device *dev, int io_type,
 	struct net_device *ndev;
 	struct wilc *wl;
 
-	sema_init(&close_exit_sync, 0);
+	init_completion(&close_exit_sync);
 
 	wl = kzalloc(sizeof(*wl), GFP_KERNEL);
 	if (!wl)
