@@ -1,7 +1,7 @@
 #ifndef __WILC_MSG_QUEUE_H__
 #define __WILC_MSG_QUEUE_H__
 
-#include <linux/semaphore.h>
+#include <linux/completion.h>
 #include <linux/list.h>
 
 struct message {
@@ -11,7 +11,7 @@ struct message {
 };
 
 struct message_queue {
-	struct semaphore sem;
+	struct completion comp;
 	spinlock_t lock;
 	bool exiting;
 	u32 recv_count;

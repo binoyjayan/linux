@@ -3,6 +3,7 @@
 #include <linux/spinlock.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
+#include <linux/completion.h>
 
 /*!
  *  @author		syounan
@@ -13,7 +14,7 @@
 int wilc_mq_create(struct message_queue *mq)
 {
 	spin_lock_init(&mq->lock);
-	sema_init(&mq->sem, 0);
+	init_completion(&mq->comp);
 	INIT_LIST_HEAD(&mq->msg_list);
 	mq->recv_count = 0;
 	mq->exiting = false;
@@ -34,7 +35,7 @@ int wilc_mq_destroy(struct message_queue *mq)
 
 	/* Release any waiting receiver thread. */
 	while (mq->recv_count > 0) {
-		up(&mq->sem);
+		complete(&mq->comp);
 		mq->recv_count--;
 	}
 
@@ -85,7 +86,7 @@ int wilc_mq_send(struct message_queue *mq,
 
 	spin_unlock_irqrestore(&mq->lock, flags);
 
-	up(&mq->sem);
+	complete(&mq->comp);
 
 	return 0;
 }
@@ -112,19 +113,19 @@ int wilc_mq_recv(struct message_queue *mq,
 	mq->recv_count++;
 	spin_unlock_irqrestore(&mq->lock, flags);
 
-	down(&mq->sem);
+	wait_for_completion(&mq->comp);
 	spin_lock_irqsave(&mq->lock, flags);
 
 	if (list_empty(&mq->msg_list)) {
 		spin_unlock_irqrestore(&mq->lock, flags);
-		up(&mq->sem);
+		complete(&mq->comp);
 		return -EFAULT;
 	}
 	/* check buffer size */
 	msg = list_first_entry(&mq->msg_list, struct message, list);
 	if (recv_buf_size < msg->len) {
 		spin_unlock_irqrestore(&mq->lock, flags);
-		up(&mq->sem);
+		complete(&mq->comp);
 		return -EOVERFLOW;
 	}
 
