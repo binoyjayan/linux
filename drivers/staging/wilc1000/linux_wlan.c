@@ -21,7 +21,6 @@
 #include <linux/kernel.h>
 #include <linux/skbuff.h>
 #include <linux/mutex.h>
-#include <linux/semaphore.h>
 #include <linux/completion.h>
 
 static int dev_state_ev_handler(struct notifier_block *this,
@@ -219,17 +218,6 @@ static void deinit_irq(struct net_device *dev)
 		free_irq(wilc->dev_irq_num, wilc);
 		gpio_free(wilc->gpio);
 	}
-}
-
-int wilc_lock_timeout(struct wilc *nic, void *vp, u32 timeout)
-{
-	/* FIXME: replace with mutex_lock or wait_for_completion */
-	int error = -1;
-
-	if (vp)
-		error = down_timeout(vp,
-				     msecs_to_jiffies(timeout));
-	return error;
 }
 
 void wilc_mac_indicate(struct wilc *wilc, int flag)
