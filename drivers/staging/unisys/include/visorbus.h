@@ -34,6 +34,7 @@
 #include <linux/poll.h>
 #include <linux/kernel.h>
 #include <linux/uuid.h>
+#include <linux/mutex.h>
 
 #include "periodic_work.h"
 #include "channel.h"
@@ -159,7 +160,7 @@ struct visor_device {
 	struct list_head list_all;
 	struct periodic_work *periodic_work;
 	bool being_removed;
-	struct semaphore visordriver_callback_lock;
+	struct mutex visordriver_callback_lock;
 	bool pausing;
 	bool resuming;
 	u32 chipset_bus_no;
