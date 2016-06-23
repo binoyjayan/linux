@@ -43,6 +43,7 @@
 #include <linux/delay.h>
 #include <linux/workqueue.h>
 #include <linux/mutex.h>
+#include <linux/completion.h>
 #include <linux/jhash.h>
 #include <linux/kref.h>
 #include <net/netlink.h>
@@ -69,7 +70,7 @@ struct iwpm_nlmsg_request {
 	u8	            nl_client;
 	u8                  request_done;
 	u16                 err_code;
-	struct semaphore    sem;
+	struct completion   comp;
 	struct kref         kref;
 };
 

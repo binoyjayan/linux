@@ -322,8 +322,7 @@ struct iwpm_nlmsg_request *iwpm_get_nlmsg_request(__u32 nlmsg_seq,
 	nlmsg_request->nl_client = nl_client;
 	nlmsg_request->request_done = 0;
 	nlmsg_request->err_code = 0;
-	sema_init(&nlmsg_request->sem, 1);
-	down(&nlmsg_request->sem);
+	init_completion(&nlmsg_request->comp);
 	return nlmsg_request;
 }
 
@@ -367,8 +366,8 @@ int iwpm_wait_complete_req(struct iwpm_nlmsg_request *nlmsg_request)
 {
 	int ret;
 
-	ret = down_timeout(&nlmsg_request->sem, IWPM_NL_TIMEOUT);
-	if (ret) {
+	ret = wait_for_completion_timeout(&nlmsg_request->comp, IWPM_NL_TIMEOUT);
+	if (!ret) {
 		ret = -EINVAL;
 		pr_info("%s: Timeout %d sec for netlink request (seq = %u)\n",
 			__func__, (IWPM_NL_TIMEOUT/HZ), nlmsg_request->nlmsg_seq);
