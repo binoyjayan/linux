@@ -13,14 +13,22 @@
 #include <linux/uaccess.h>
 #include <linux/module.h>
 #include <linux/ftrace.h>
+#include <linux/percpu-defs.h>
+
+#include <trace/events/sched.h>
 
 #include "trace.h"
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/latency.h>
 
 static struct trace_array		*irqsoff_trace __read_mostly;
 static int				tracer_enabled __read_mostly;
 
 static DEFINE_PER_CPU(int, tracing_cpu);
-
+static DEFINE_PER_CPU(cycle_t, ts_irqs);
+static DEFINE_PER_CPU(cycle_t, ts_preempt);
+static DEFINE_PER_CPU(cycle_t, ts_critical_timings);
 static DEFINE_RAW_SPINLOCK(max_trace_lock);
 
 enum {
@@ -419,9 +427,17 @@ stop_critical_timing(unsigned long ip, unsigned long parent_ip)
 	atomic_dec(&data->disabled);
 }
 
+static inline cycle_t get_delta(cycle_t __percpu *ts)
+{
+	return (cycle_t) trace_clock_local() - this_cpu_read(*ts);
+}
 /* start and stop critical timings used to for stoppage (in idle) */
 void start_critical_timings(void)
 {
+	if (trace_latency_critical_timings_enabled())
+		this_cpu_write(ts_critical_timings,
+			(cycle_t) trace_clock_local());
+
 	if (preempt_trace() || irq_trace())
 		start_critical_timing(CALLER_ADDR0, CALLER_ADDR1);
 }
@@ -431,6 +447,13 @@ void stop_critical_timings(void)
 {
 	if (preempt_trace() || irq_trace())
 		stop_critical_timing(CALLER_ADDR0, CALLER_ADDR1);
+
+	if (trace_latency_critical_timings_enabled()) {
+		trace_latency_critical_timings(
+			raw_smp_processor_id(),
+			get_delta(&ts_critical_timings));
+	}
+
 }
 EXPORT_SYMBOL_GPL(stop_critical_timings);
 
@@ -438,6 +461,10 @@ EXPORT_SYMBOL_GPL(stop_critical_timings);
 #ifdef CONFIG_PROVE_LOCKING
 void time_hardirqs_on(unsigned long a0, unsigned long a1)
 {
+	if (trace_latency_irqs_enabled()) {
+		trace_latency_irqs(raw_smp_processor_id(),
+			get_delta(&ts_irqs));
+	}
 	if (!preempt_trace() && irq_trace())
 		stop_critical_timing(a0, a1);
 }
@@ -446,6 +473,10 @@ void time_hardirqs_off(unsigned long a0, unsigned long a1)
 {
 	if (!preempt_trace() && irq_trace())
 		start_critical_timing(a0, a1);
+
+	if (trace_latency_irqs_enabled()) {
+                this_cpu_write(ts_irqs, (cycle_t) trace_clock_local());
+	}
 }
 
 #else /* !CONFIG_PROVE_LOCKING */
@@ -500,9 +531,16 @@ EXPORT_SYMBOL(trace_hardirqs_off_caller);
 #endif /* CONFIG_PROVE_LOCKING */
 #endif /*  CONFIG_IRQSOFF_TRACER */
 
+int count = 0;
+
 #ifdef CONFIG_PREEMPT_TRACER
 void trace_preempt_on(unsigned long a0, unsigned long a1)
 {
+	if (trace_latency_preempt_enabled()) {
+		trace_latency_preempt(raw_smp_processor_id(),
+			get_delta(&ts_preempt));
+	}
+
 	if (preempt_trace() && !irq_trace())
 		stop_critical_timing(a0, a1);
 }
@@ -511,6 +549,10 @@ void trace_preempt_off(unsigned long a0, unsigned long a1)
 {
 	if (preempt_trace() && !irq_trace())
 		start_critical_timing(a0, a1);
+
+	if (trace_latency_preempt_enabled()) {
+                this_cpu_write(ts_preempt, (cycle_t) trace_clock_local());
+	}
 }
 #endif /* CONFIG_PREEMPT_TRACER */
 
