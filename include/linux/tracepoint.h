@@ -138,7 +138,7 @@ extern void syscall_unregfunc(void);
 			return;						\
 		prercu;							\
 		rcu_read_lock_sched_notrace();				\
-		it_func_ptr = rcu_dereference_sched((tp)->funcs);	\
+		it_func_ptr = rcu_dereference_raw_notrace((tp)->funcs);	\
 		if (it_func_ptr) {					\
 			do {						\
 				it_func = (it_func_ptr)->func;		\
@@ -189,7 +189,7 @@ extern void syscall_unregfunc(void);
 				TP_CONDITION(cond),,);			\
 		if (IS_ENABLED(CONFIG_LOCKDEP) && (cond)) {		\
 			rcu_read_lock_sched_notrace();			\
-			rcu_dereference_sched(__tracepoint_##name.funcs);\
+			rcu_dereference_raw_notrace(__tracepoint_##name.funcs);\
 			rcu_read_unlock_sched_notrace();		\
 		}							\
 	}								\
