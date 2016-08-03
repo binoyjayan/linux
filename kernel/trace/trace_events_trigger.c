@@ -71,14 +71,14 @@ event_triggers_call(struct trace_event_file *file, void *rec)
 	if (list_empty(&file->triggers))
 		return tt;
 
-	list_for_each_entry_rcu(data, &file->triggers, list) {
+	list_for_each_entry_rcu_notrace(data, &file->triggers, list) {
 		if (data->paused)
 			continue;
 		if (!rec) {
 			data->ops->func(data, rec);
 			continue;
 		}
-		filter = rcu_dereference_sched(data->filter);
+		filter = rcu_dereference_raw_notrace(data->filter);
 		if (filter && !filter_match_preds(filter, rec))
 			continue;
 		if (event_command_post_trigger(data->cmd_ops)) {
@@ -111,7 +111,7 @@ event_triggers_post_call(struct trace_event_file *file,
 {
 	struct event_trigger_data *data;
 
-	list_for_each_entry_rcu(data, &file->triggers, list) {
+	list_for_each_entry_rcu_notrace(data, &file->triggers, list) {
 		if (data->paused)
 			continue;
 		if (data->cmd_ops->trigger_type & tt)
