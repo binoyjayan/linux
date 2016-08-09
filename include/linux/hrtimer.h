@@ -104,6 +104,9 @@ struct hrtimer {
 	struct hrtimer_clock_base	*base;
 	u8				state;
 	u8				is_rel;
+#ifdef CONFIG_DELAYED_TIMER_OFFSETS_HIST
+	ktime_t				praecox;
+#endif
 #ifdef CONFIG_TIMER_STATS
 	int				start_pid;
 	void				*start_site;

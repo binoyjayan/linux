@@ -193,5 +193,12 @@ config HIGH_RES_TIMERS
 	  hardware is not capable then this option only increases
 	  the size of the kernel image.
 
+config DELAYED_TIMER_OFFSETS_HIST
+	depends on HIGH_RES_TIMERS
+	select GENERIC_TRACER
+	bool "Delayed Timer Offsets Histogram"
+	help
+	  Generate a histogram of delayed timer offsets in nanoseconds.
+
 endmenu
 endif

@@ -56,6 +56,8 @@
 
 #include "tick-internal.h"
 
+static enum hrtimer_restart hrtimer_wakeup(struct hrtimer *timer);
+
 /*
  * The timer bases:
  *
@@ -960,6 +962,52 @@ static inline ktime_t hrtimer_update_lowres(struct hrtimer *timer, ktime_t tim,
 	return tim;
 }
 
+#ifdef CONFIG_DELAYED_TIMER_OFFSETS_HIST
+static inline void latency_hrtimer_timing_start(struct hrtimer *timer,
+					 struct hrtimer_clock_base *new_base,
+					 ktime_t tim)
+{
+	if (unlikely(trace_latency_hrtimer_interrupt_enabled())) {
+		ktime_t now = new_base->get_time();
+
+		if (ktime_to_ns(tim) < ktime_to_ns(now))
+			timer->praecox = now;
+		else
+			timer->praecox = ktime_set(0, 0);
+	}
+}
+
+static inline void latency_hrtimer_timing_stop(struct hrtimer *timer,
+						ktime_t basenow)
+{
+	long latency;
+	struct task_struct *task;
+
+	if (likely(!trace_latency_hrtimer_interrupt_enabled()))
+		return;
+
+	latency = ktime_to_ns(ktime_sub(basenow,
+			      ktime_to_ns(timer->praecox) ?
+			      timer->praecox : hrtimer_get_expires(timer)));
+	task = timer->function == hrtimer_wakeup ?
+			container_of(timer, struct hrtimer_sleeper,
+				     timer)->task : NULL;
+	if (latency > 0)
+		trace_latency_hrtimer_interrupt((u64) latency, task);
+}
+#else
+static inline void latency_hrtimer_timing_start(struct hrtimer *timer,
+					 struct hrtimer_clock_base *new_base,
+					 ktime_t tim)
+{
+}
+static inline void latency_hrtimer_timing_stop(struct hrtimer *timer,
+						ktime_t basenow)
+{
+}
+
+#endif
+
 /**
  * hrtimer_start_range_ns - (re)start an hrtimer on the current CPU
  * @timer:	the timer to be added
@@ -991,6 +1039,8 @@ void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 	new_base = switch_hrtimer_base(timer, base, mode & HRTIMER_MODE_PINNED);
 
 	timer_stats_hrtimer_set_start_info(timer);
+
+	latency_hrtimer_timing_start(timer, new_base, tim);
 
 	leftmost = enqueue_hrtimer(timer, new_base);
 	if (!leftmost)
@@ -1283,6 +1333,8 @@ static void __hrtimer_run_queues(struct hrtimer_cpu_base *cpu_base, ktime_t now)
 			struct hrtimer *timer;
 
 			timer = container_of(node, struct hrtimer, node);
+
+			latency_hrtimer_timing_stop(timer, basenow);
 
 			/*
 			 * The immediate goal for using the softexpires is

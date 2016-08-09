@@ -382,6 +382,31 @@ TRACE_EVENT(tick_stop,
 );
 #endif
 
+#ifdef CONFIG_DELAYED_TIMER_OFFSETS_HIST
+TRACE_EVENT(latency_hrtimer_interrupt,
+
+	TP_PROTO(long long toffset, struct task_struct *task),
+
+	TP_ARGS(toffset, task),
+
+	TP_STRUCT__entry(
+		__field(long long,	toffset)
+		__array(char,		tcomm,	TASK_COMM_LEN)
+		__field(int,		tprio)
+	),
+
+	TP_fast_assign(
+		__entry->toffset = toffset;
+		memcpy(__entry->tcomm, task != NULL ? task->comm : "<none>",
+			task != NULL ? TASK_COMM_LEN : 7);
+		__entry->tprio  = task != NULL ? task->prio : -1;
+	),
+
+	TP_printk("toffset=%lld thread=%s[%d]",
+		__entry->toffset, __entry->tcomm, __entry->tprio)
+);
+#endif
+
 #endif /*  _TRACE_TIMER_H */
 
 /* This part must be outside protection */
