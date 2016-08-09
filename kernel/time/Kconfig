@@ -193,5 +193,13 @@ config HIGH_RES_TIMERS
 	  hardware is not capable then this option only increases
 	  the size of the kernel image.
 
+config TRACE_DELAYED_TIMER_OFFSETS
+	depends on HIGH_RES_TIMERS
+	select GENERIC_TRACER
+	bool "Delayed Timer Offsets"
+	help
+	  Capture offsets of delayed hrtimer in nanoseconds. It is used
+	  to construct wakeup latency histogram.
+
 endmenu
 endif

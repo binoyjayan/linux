@@ -90,6 +90,7 @@ enum hrtimer_restart {
  * @is_rel:	Set if the timer was armed relative
  * @start_pid:  timer statistics field to store the pid of the task which
  *		started the timer
+ * @tim_expiry: hrtimer expiry time or 0 in case already expired
  * @start_site:	timer statistics field to store the site where the timer
  *		was started
  * @start_comm: timer statistics field to store the name of the process which
@@ -104,6 +105,9 @@ struct hrtimer {
 	struct hrtimer_clock_base	*base;
 	u8				state;
 	u8				is_rel;
+#ifdef CONFIG_TRACE_DELAYED_TIMER_OFFSETS
+	ktime_t				tim_expiry;
+#endif
 #ifdef CONFIG_TIMER_STATS
 	int				start_pid;
 	void				*start_site;
