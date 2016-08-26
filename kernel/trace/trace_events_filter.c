@@ -608,11 +608,11 @@ int filter_match_preds(struct event_filter *filter, void *rec)
 	/*
 	 * n_preds, root and filter->preds are protect with preemption disabled.
 	 */
-	root = rcu_dereference_sched(filter->root);
+	root = rcu_dereference_raw_notrace(filter->root);
 	if (!root)
 		return 1;
 
-	data.preds = preds = rcu_dereference_sched(filter->preds);
+	data.preds = preds = rcu_dereference_raw_notrace(filter->preds);
 	ret = walk_pred_tree(preds, root, filter_match_preds_cb, &data);
 	WARN_ON(ret);
 	return data.match;
