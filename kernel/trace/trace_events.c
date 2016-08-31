@@ -152,7 +152,8 @@ EXPORT_SYMBOL_GPL(trace_define_field);
 
 #define __generic_field(type, item, filter_type)			\
 	ret = __trace_define_field(&ftrace_generic_fields, #type,	\
-				   #item, 0, 0, is_signed_type(type),	\
+				   #item, 0, sizeof(type),              \
+				   is_signed_type(type),                \
 				   filter_type);			\
 	if (ret)							\
 		return ret;

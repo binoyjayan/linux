@@ -75,6 +75,11 @@ static u64 hist_field_log2(struct hist_field *hist_field, void *event)
 	return (u64) ilog2(roundup_pow_of_two(val));
 }
 
+static u64 hist_field_cpu(struct hist_field *hist_field, void *event)
+{
+	return (u64) raw_smp_processor_id();
+}
+
 #define DEFINE_HIST_FIELD_FN(type)					\
 static u64 hist_field_##type(struct hist_field *hist_field, void *event)\
 {									\
@@ -119,6 +124,7 @@ enum hist_field_flags {
 	HIST_FIELD_FL_SYSCALL		= 128,
 	HIST_FIELD_FL_STACKTRACE	= 256,
 	HIST_FIELD_FL_LOG2		= 512,
+	HIST_FIELD_FL_CPU		= 1024,
 };
 
 struct hist_trigger_attrs {
@@ -371,6 +377,11 @@ static struct hist_field *create_hist_field(struct ftrace_event_field *field,
 		goto out;
 	}
 
+	if (flags & HIST_FIELD_FL_CPU) {
+		hist_field->fn = hist_field_cpu;
+		goto out;
+	}
+
 	if (WARN_ON_ONCE(!field))
 		goto out;
 
@@ -526,6 +537,9 @@ static int create_key_field(struct hist_trigger_data *hist_data,
 	} else {
 		char *field_name = strsep(&field_str, ".");
 
+		if (strcmp(field_name, "cpu") == 0)
+			flags |= HIST_FIELD_FL_CPU;
+
 		if (field_str) {
 			if (strcmp(field_str, "hex") == 0)
 				flags |= HIST_FIELD_FL_HEX;
@@ -556,6 +570,7 @@ static int create_key_field(struct hist_trigger_data *hist_data,
 			key_size = MAX_FILTER_STR_VAL;
 		else
 			key_size = field->size;
+
 	}
 
 	hist_data->fields[key_idx] = create_hist_field(field, flags);
