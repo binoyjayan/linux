@@ -75,6 +75,16 @@ static u64 hist_field_log2(struct hist_field *hist_field, void *event)
 	return (u64) ilog2(roundup_pow_of_two(val));
 }
 
+static u64 hist_field_cpu(struct hist_field *hist_field, void *event)
+{
+	return (u64) smp_processor_id();
+}
+
+static u64 hist_field_comm(struct hist_field *hist_field, void *event)
+{
+	return (u64) (unsigned long) current->comm;
+}
+
 #define DEFINE_HIST_FIELD_FN(type)					\
 static u64 hist_field_##type(struct hist_field *hist_field, void *event)\
 {									\
@@ -119,6 +129,8 @@ enum hist_field_flags {
 	HIST_FIELD_FL_SYSCALL		= 128,
 	HIST_FIELD_FL_STACKTRACE	= 256,
 	HIST_FIELD_FL_LOG2		= 512,
+	HIST_FIELD_FL_CPU		= 1024,
+	HIST_FIELD_FL_COMM		= 2048,
 };
 
 struct hist_trigger_attrs {
@@ -374,7 +386,13 @@ static struct hist_field *create_hist_field(struct ftrace_event_field *field,
 	if (WARN_ON_ONCE(!field))
 		goto out;
 
-	if (is_string_field(field)) {
+	if (field->filter_type == FILTER_CPU) {
+		flags |= HIST_FIELD_FL_CPU;
+		hist_field->fn = hist_field_cpu;
+	} else if (field->filter_type == FILTER_COMM) {
+		flags |= HIST_FIELD_FL_COMM;
+		hist_field->fn = hist_field_comm;
+	} else if (is_string_field(field)) {
 		flags |= HIST_FIELD_FL_STRING;
 
 		if (field->filter_type == FILTER_STATIC_STRING)
@@ -748,7 +766,8 @@ static int create_tracing_map_fields(struct hist_trigger_data *hist_data)
 
 			if (hist_field->flags & HIST_FIELD_FL_STACKTRACE)
 				cmp_fn = tracing_map_cmp_none;
-			else if (is_string_field(field))
+			else if (is_string_field(field) ||
+				 hist_field->flags & HIST_FIELD_FL_COMM)
 				cmp_fn = tracing_map_cmp_string;
 			else
 				cmp_fn = tracing_map_cmp_num(field->size,
@@ -856,11 +875,9 @@ static inline void add_to_key(char *compound_key, void *key,
 			      struct hist_field *key_field, void *rec)
 {
 	size_t size = key_field->size;
+	struct ftrace_event_field *field = key_field->field;
 
 	if (key_field->flags & HIST_FIELD_FL_STRING) {
-		struct ftrace_event_field *field;
-
-		field = key_field->field;
 		if (field->filter_type == FILTER_DYN_STRING)
 			size = *(u32 *)(rec + field->offset) >> 16;
 		else if (field->filter_type == FILTER_PTR_STRING)
@@ -871,6 +888,8 @@ static inline void add_to_key(char *compound_key, void *key,
 		/* ensure NULL-termination */
 		if (size > key_field->size - 1)
 			size = key_field->size - 1;
+	} else if (field->filter_type == FILTER_STATIC_STRING) {
+		size = field->size;
 	}
 
 	memcpy(compound_key + key_field->offset, key, size);
@@ -906,7 +925,8 @@ static void event_hist_trigger(struct event_trigger_data *data, void *rec)
 			key = entries;
 		} else {
 			field_contents = key_field->fn(key_field, rec);
-			if (key_field->flags & HIST_FIELD_FL_STRING) {
+			if (key_field->flags & (HIST_FIELD_FL_STRING |
+						HIST_FIELD_FL_COMM)) {
 				key = (void *)(unsigned long)field_contents;
 				use_compound_key = true;
 			} else
@@ -1003,6 +1023,10 @@ hist_trigger_entry_print(struct seq_file *m,
 				   *(u64 *)(key + key_field->offset));
 		} else if (key_field->flags & HIST_FIELD_FL_STRING) {
 			seq_printf(m, "%s: %-50s", key_field->field->name,
+				   (char *)(key + key_field->offset));
+		} else if (key_field->flags & HIST_FIELD_FL_COMM) {
+			seq_printf(m, "%s: %-16s",
+				   key_field->field->name,
 				   (char *)(key + key_field->offset));
 		} else {
 			uval = *(u64 *)(key + key_field->offset);

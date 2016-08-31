@@ -150,9 +150,10 @@ int trace_define_field(struct trace_event_call *call, const char *type,
 }
 EXPORT_SYMBOL_GPL(trace_define_field);
 
-#define __generic_field(type, item, filter_type)			\
+#define __generic_field(type, item, filter_type, size)			\
 	ret = __trace_define_field(&ftrace_generic_fields, #type,	\
-				   #item, 0, 0, is_signed_type(type),	\
+				   #item, 0, size,			\
+				   is_signed_type(type),                \
 				   filter_type);			\
 	if (ret)							\
 		return ret;
@@ -170,10 +171,10 @@ static int trace_define_generic_fields(void)
 {
 	int ret;
 
-	__generic_field(int, CPU, FILTER_CPU);
-	__generic_field(int, cpu, FILTER_CPU);
-	__generic_field(char *, COMM, FILTER_COMM);
-	__generic_field(char *, comm, FILTER_COMM);
+	__generic_field(int, CPU, FILTER_CPU, sizeof(int));
+	__generic_field(int, cpu, FILTER_CPU, sizeof(int));
+	__generic_field(char *, COMM, FILTER_COMM, TASK_COMM_LEN + 1);
+	__generic_field(char *, comm, FILTER_COMM, TASK_COMM_LEN + 1);
 
 	return ret;
 }
