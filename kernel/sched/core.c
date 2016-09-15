@@ -91,6 +91,8 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
 
+extern cycle_t ftrace_now(int cpu);
+
 DEFINE_MUTEX(sched_domains_mutex);
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 
@@ -1676,6 +1678,19 @@ static inline void ttwu_activate(struct rq *rq, struct task_struct *p, int en_fl
 		wq_worker_waking_up(p, cpu_of(rq));
 }
 
+static inline void latency_wakeup_start(struct task_struct *task)
+{
+       task->preempt_timestamp_hist = ftrace_now(smp_processor_id());
+}
+
+static inline void latency_wakeup_stop(struct task_struct *next)
+{
+	if (next->preempt_timestamp_hist != 0) {
+		trace_latency_wakeup(next, ftrace_now(smp_processor_id()) - next->preempt_timestamp_hist);
+		next->preempt_timestamp_hist = 0;
+	}
+}
+
 /*
  * Mark the task runnable and perform wakeup-preemption.
  */
@@ -1685,6 +1700,7 @@ static void ttwu_do_wakeup(struct rq *rq, struct task_struct *p, int wake_flags,
 	check_preempt_curr(rq, p, wake_flags);
 	p->state = TASK_RUNNING;
 	trace_sched_wakeup(p);
+	latency_wakeup_start(p);
 
 #ifdef CONFIG_SMP
 	if (p->sched_class->task_woken) {
@@ -2551,6 +2567,7 @@ void wake_up_new_task(struct task_struct *p)
 	activate_task(rq, p, 0);
 	p->on_rq = TASK_ON_RQ_QUEUED;
 	trace_sched_wakeup_new(p);
+	latency_wakeup_start(p);
 	check_preempt_curr(rq, p, WF_FORK);
 #ifdef CONFIG_SMP
 	if (p->sched_class->task_woken) {
@@ -3373,6 +3390,7 @@ static void __sched notrace __schedule(bool preempt)
 		++*switch_count;
 
 		trace_sched_switch(preempt, prev, next);
+		latency_wakeup_stop(next);
 		rq = context_switch(rq, prev, next, cookie); /* unlocks the rq */
 	} else {
 		lockdep_unpin_lock(&rq->lock, cookie);

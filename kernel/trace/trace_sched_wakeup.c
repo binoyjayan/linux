@@ -423,6 +423,11 @@ tracing_sched_wakeup_trace(struct trace_array *tr,
 		trace_buffer_unlock_commit(tr, buffer, event, flags, pc);
 }
 
+static inline void latency_wakeup_stop(struct task_struct *next, u64 ts)
+{
+	trace_latency_wakeup(next, ts - next->preempt_timestamp_hist);
+}
+
 static void notrace
 probe_wakeup_sched_switch(void *ignore, bool preempt,
 			  struct task_struct *prev, struct task_struct *next)
@@ -476,6 +481,8 @@ probe_wakeup_sched_switch(void *ignore, bool preempt,
 	T1 = ftrace_now(cpu);
 	delta = T1-T0;
 
+	//latency_wakeup_stop(next, (u64) T1);
+
 	if (!report_latency(wakeup_trace, delta))
 		goto out_unlock;
 
@@ -515,6 +522,11 @@ static void wakeup_reset(struct trace_array *tr)
 	__wakeup_reset(tr);
 	arch_spin_unlock(&wakeup_lock);
 	local_irq_restore(flags);
+}
+
+static inline void latency_wakeup_start(struct task_struct *task, u64 ts)
+{
+	task->preempt_timestamp_hist = ts;
 }
 
 static void
@@ -583,6 +595,7 @@ probe_wakeup(void *ignore, struct task_struct *p)
 	data->preempt_timestamp = ftrace_now(cpu);
 	tracing_sched_wakeup_trace(wakeup_trace, p, current, flags, pc);
 
+	//latency_wakeup_start(wakeup_task, (u64) data->preempt_timestamp);
 	/*
 	 * We must be careful in using CALLER_ADDR2. But since wake_up
 	 * is not called by an assembly function  (where as schedule is)
