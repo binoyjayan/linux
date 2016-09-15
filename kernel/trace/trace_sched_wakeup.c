@@ -423,6 +423,29 @@ tracing_sched_wakeup_trace(struct trace_array *tr,
 		trace_buffer_unlock_commit(tr, buffer, event, flags, pc);
 }
 
+#ifdef CONFIG_TRACE_EVENTS_WAKEUP_LATENCY
+static inline void latency_wakeup_start(struct task_struct *task, u64 ts)
+{
+       task->wakeup_timestamp_start = ts;
+}
+
+static inline void latency_wakeup_stop(struct task_struct *next, u64 ts)
+{
+	if (next->wakeup_timestamp_start != 0) {
+		trace_latency_wakeup(next, ts - next->wakeup_timestamp_start);
+		next->wakeup_timestamp_start = 0;
+	}
+}
+#else
+static inline void latency_wakeup_start(struct task_struct *task, u64 ts)
+{
+}
+
+static inline void latency_wakeup_stop(struct task_struct *next, u64 ts)
+{
+}
+#endif
+
 static void notrace
 probe_wakeup_sched_switch(void *ignore, bool preempt,
 			  struct task_struct *prev, struct task_struct *next)
@@ -435,6 +458,10 @@ probe_wakeup_sched_switch(void *ignore, bool preempt,
 	int pc;
 
 	tracing_record_cmdline(prev);
+
+	cpu = raw_smp_processor_id();
+	T1 = ftrace_now(cpu);
+	latency_wakeup_stop(next, (u64) T1);
 
 	if (unlikely(!tracer_enabled))
 		return;
@@ -454,7 +481,6 @@ probe_wakeup_sched_switch(void *ignore, bool preempt,
 	pc = preempt_count();
 
 	/* disable local data, not wakeup_cpu data */
-	cpu = raw_smp_processor_id();
 	disabled = atomic_inc_return(&per_cpu_ptr(wakeup_trace->trace_buffer.data, cpu)->disabled);
 	if (likely(disabled != 1))
 		goto out;
@@ -473,7 +499,6 @@ probe_wakeup_sched_switch(void *ignore, bool preempt,
 	tracing_sched_switch_trace(wakeup_trace, prev, next, flags, pc);
 
 	T0 = data->preempt_timestamp;
-	T1 = ftrace_now(cpu);
 	delta = T1-T0;
 
 	if (!report_latency(wakeup_trace, delta))
@@ -525,6 +550,10 @@ probe_wakeup(void *ignore, struct task_struct *p)
 	unsigned long flags;
 	long disabled;
 	int pc;
+	cycle_t T0;
+
+	T0 = ftrace_now(cpu);
+	latency_wakeup_start(p, (u64) T0);
 
 	if (likely(!tracer_enabled))
 		return;
@@ -580,7 +609,7 @@ probe_wakeup(void *ignore, struct task_struct *p)
 	local_save_flags(flags);
 
 	data = per_cpu_ptr(wakeup_trace->trace_buffer.data, wakeup_cpu);
-	data->preempt_timestamp = ftrace_now(cpu);
+	data->preempt_timestamp = T0;
 	tracing_sched_wakeup_trace(wakeup_trace, p, current, flags, pc);
 
 	/*

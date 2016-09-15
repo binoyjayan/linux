@@ -562,6 +562,38 @@ TRACE_EVENT(sched_wake_idle_without_ipi,
 
 	TP_printk("cpu=%d", __entry->cpu)
 );
+
+/**
+ * latency_wakeup - Called when process is woken up
+ * @next:	task to be woken up
+ * @wakeup_lat:	process wakeup latency in nano seconds
+ */
+TRACE_EVENT(latency_wakeup,
+
+	TP_PROTO(struct task_struct *next, u64 wakeup_latency),
+	TP_ARGS(next, wakeup_latency),
+
+	TP_STRUCT__entry(
+		__array(char,		ccomm,  TASK_COMM_LEN)
+		__field(int,		cprio)
+		__field(unsigned long,	wakeup_lat)
+		__field(unsigned long,	timeroffset)
+		__field(unsigned long,	total_lat)
+	),
+
+	TP_fast_assign(
+		memcpy(__entry->ccomm, next->comm, TASK_COMM_LEN);
+		__entry->cprio  = next->prio;
+		__entry->wakeup_lat = wakeup_latency;
+		__entry->timeroffset = next->timer_offset;
+		__entry->total_lat = wakeup_latency + next->timer_offset;
+	),
+
+	TP_printk("curr=%s[%d] wakeup_lat=%lu timeroffset=%ld total_lat=%lu",
+		__entry->ccomm, __entry->cprio, __entry->wakeup_lat,
+		__entry->timeroffset, __entry->total_lat)
+);
+
 #endif /* _TRACE_SCHED_H */
 
 /* This part must be outside protection */
