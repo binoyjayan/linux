@@ -1894,6 +1894,9 @@ struct task_struct {
 #ifdef CONFIG_TRACE_DELAYED_TIMER_OFFSETS
 	long timer_offset;
 #endif /* CONFIG_TRACE_DELAYED_TIMER_OFFSETS */
+#ifdef CONFIG_TRACE_EVENTS_WAKEUP_LATENCY
+	u64 preempt_timestamp_hist;
+#endif
 #ifdef CONFIG_KCOV
 	/* Coverage collection mode enabled for this task (0 if disabled). */
 	enum kcov_mode kcov_mode;

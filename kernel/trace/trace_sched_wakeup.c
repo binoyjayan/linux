@@ -423,6 +423,33 @@ tracing_sched_wakeup_trace(struct trace_array *tr,
 		trace_buffer_unlock_commit(tr, buffer, event, flags, pc);
 }
 
+#ifdef CONFIG_TRACE_EVENTS_WAKEUP_LATENCY
+static inline void latency_wakeup_event(struct task_struct *t, cycle_t delta)
+{
+	trace_latency_wakeup(t, (u64) delta);
+}
+static inline void latency_wakeup_start(struct task_struct *task, u64 ts)
+{
+       task->preempt_timestamp_hist = ts;
+}
+
+static inline void latency_wakeup_stop(struct task_struct *next, u64 ts)
+{
+       trace_latency_wakeup(next, ts - next->preempt_timestamp_hist);
+}
+#else
+static inline void latency_wakeup_event(struct task_struct *t, cycle_t delta)
+{
+}
+static inline void latency_wakeup_start(struct task_struct *task, u64 ts)
+{
+}
+
+static inline void latency_wakeup_stop(struct task_struct *next, u64 ts)
+{
+}
+#endif
+
 static void notrace
 probe_wakeup_sched_switch(void *ignore, bool preempt,
 			  struct task_struct *prev, struct task_struct *next)
@@ -475,6 +502,9 @@ probe_wakeup_sched_switch(void *ignore, bool preempt,
 	T0 = data->preempt_timestamp;
 	T1 = ftrace_now(cpu);
 	delta = T1-T0;
+
+	//latency_wakeup_event(next, delta);
+	latency_wakeup_stop(next, (u64) T1);
 
 	if (!report_latency(wakeup_trace, delta))
 		goto out_unlock;
@@ -582,6 +612,7 @@ probe_wakeup(void *ignore, struct task_struct *p)
 	data = per_cpu_ptr(wakeup_trace->trace_buffer.data, wakeup_cpu);
 	data->preempt_timestamp = ftrace_now(cpu);
 	tracing_sched_wakeup_trace(wakeup_trace, p, current, flags, pc);
+	latency_wakeup_start(wakeup_task, (u64) data->preempt_timestamp);
 
 	/*
 	 * We must be careful in using CALLER_ADDR2. But since wake_up

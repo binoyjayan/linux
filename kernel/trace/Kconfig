@@ -634,6 +634,16 @@ config RING_BUFFER_STARTUP_TEST
 
 	 If unsure, say N
 
+config TRACE_EVENTS_WAKEUP_LATENCY
+       bool "Trace wakeup latency events"
+       depends on TRACE_DELAYED_TIMER_OFFSETS
+       depends on SCHED_TRACER
+       help
+        Generate the total wakeup latency of a process. It includes the
+        wakeup latency and the timer offset latency. Wakeup latency is the
+        difference in the time when a process is scheduled to be woken up
+        and when it is actually woken up. It depends on the wakeup tracer.
+
 config TRACE_ENUM_MAP_FILE
        bool "Show enum mappings for trace events"
        depends on TRACING
