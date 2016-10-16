@@ -326,6 +326,16 @@ config CRYPTO_CTS
 	  This mode is required for Kerberos gss mechanism support
 	  for AES encryption.
 
+config CRYPTO_GENIV
+	tristate "IV Generation for dm-crypt"
+	select CRYPTO_BLKCIPHER
+	help
+	  GENIV: IV Generation for dm-crypt
+	  Algorithms to generate Initialization Vector for ciphers
+	  used by dm-crypt.  The iv generation algorithms implemented
+	  as part of geniv include plain, plain64, essiv, benbi, null,
+	  lmk and tcw.
+
 config CRYPTO_ECB
 	tristate "ECB support"
 	select CRYPTO_BLKCIPHER
