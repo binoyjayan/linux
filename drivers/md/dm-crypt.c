@@ -28,25 +28,13 @@
 #include <crypto/hash.h>
 #include <crypto/md5.h>
 #include <crypto/algapi.h>
+#include <crypto/internal/skcipher.h>
 #include <crypto/skcipher.h>
+#include <crypto/geniv.h>
 
 #include <linux/device-mapper.h>
 
 #define DM_MSG_PREFIX "crypt"
-
-/*
- * context holding the current state of a multi-part conversion
- */
-struct convert_context {
-	struct completion restart;
-	struct bio *bio_in;
-	struct bio *bio_out;
-	struct bvec_iter iter_in;
-	struct bvec_iter iter_out;
-	sector_t cc_sector;
-	atomic_t cc_pending;
-	struct skcipher_request *req;
-};
 
 /*
  * per bio private data
@@ -64,13 +52,6 @@ struct dm_crypt_io {
 
 	struct rb_node rb_node;
 } CRYPTO_MINALIGN_ATTR;
-
-struct dm_crypt_request {
-	struct convert_context *ctx;
-	struct scatterlist sg_in;
-	struct scatterlist sg_out;
-	sector_t iv_sector;
-};
 
 struct crypt_config;
 
@@ -870,6 +851,10 @@ static int crypt_convert_block(struct crypt_config *cc,
 
 	skcipher_request_set_crypt(req, &dmreq->sg_in, &dmreq->sg_out,
 				   1 << SECTOR_SHIFT, iv);
+	if (bio_data_dir(ctx->bio_in) == WRITE)
+	 printk("BJ:%s:%d: WRITE %d bytes. sector %d\n", __func__, __LINE__, 1 << SECTOR_SHIFT, (int)ctx->cc_sector);
+	else
+	 printk("BJ:%s:%d: READ  %d bytes. sector %d\n", __func__, __LINE__, 1 << SECTOR_SHIFT, (int)ctx->cc_sector);
 
 	if (bio_data_dir(ctx->bio_in) == WRITE)
 		r = crypto_skcipher_encrypt(req);
@@ -1460,6 +1445,7 @@ static int crypt_alloc_tfms(struct crypt_config *cc, char *ciphermode)
 		return -ENOMEM;
 
 	for (i = 0; i < cc->tfms_count; i++) {
+		printk("BJ:%s:%s:%d: tfms[%d] = crypto_alloc_skcipher(%s)\n", __FILE__, __func__, __LINE__, i, ciphermode);
 		cc->tfms[i] = crypto_alloc_skcipher(ciphermode, 0, 0);
 		if (IS_ERR(cc->tfms[i])) {
 			err = PTR_ERR(cc->tfms[i]);
@@ -1561,6 +1547,128 @@ static void crypt_dtr(struct dm_target *ti)
 
 	/* Must zero key material before freeing */
 	kzfree(cc);
+}
+
+static struct dm_crypt_request *get_dmreq(struct crypto_skcipher *mytfm,
+					     struct skcipher_request *req)
+{
+        struct geniv_ctx *ctx;
+	struct dm_crypt_request *dmreq;
+
+	//ctx = (struct geniv_ctx*) (mytfm + 1);
+	ctx = crypto_skcipher_ctx(mytfm);
+
+	printk("BJ:%s:%s:%d: dmoffset=%d\n",
+		__FILE__, __func__, __LINE__, ctx->data.dmoffset);
+
+	dmreq = (struct dm_crypt_request*) ((char *) req + ctx->data.dmoffset);
+	return dmreq;
+}
+
+struct tcrypt_result {
+    struct completion completion;
+    int err;
+};
+
+#define IV_DATA "iviviviviviviviv\0\0"
+
+static void test_geniv_cb(struct crypto_async_request *req, int error)
+{
+	struct tcrypt_result *result = req->data;
+
+	if (error == -EINPROGRESS)
+		return;
+	result->err = error;
+	complete(&result->completion);
+ 	printk("Encryption finished successfully\n");
+}
+
+
+void test_geniv(struct crypt_config *cc)
+{
+	int size, ret;
+        struct geniv_ctx *ctx;
+	struct skcipher_request *req;
+        struct dm_crypt_request *dmreq;
+        u8 iv[64] = IV_DATA;
+	struct scatterlist sg;
+	struct tcrypt_result result;
+	struct crypto_skcipher *mytfm;
+
+	char scratchpad[20] = "Hello World.....";
+	char *cip="essiv(cbc(aes))";
+
+	printk("BJ:%s:%s:%d: CALLING       crypto_alloc_skcipher(%s)\n", __FILE__, __func__, __LINE__, cip);
+	mytfm = crypto_alloc_skcipher(cip, 0, 0);
+        //ctx = crypto_skcipher_ctx(mytfm);
+	printk("BJ:%s:%s:%d: RETURNED FROM crypto_alloc_skcipher(%s) ret: %p\n", __FILE__, __func__, __LINE__, cip, mytfm);
+
+        //struct geniv_ctx gen;
+	//crypto_skcipher_set_ctx(mytfm, &gen, sizeof(gen));
+	ctx = (struct geniv_ctx*) (mytfm + 1);
+	ctx->data.cipher_string = cc->cipher_string;
+	ctx->data.cipher = cc->cipher;
+	//ctx->data.ivmode = IVMODE_PLAIN;
+	//ctx->data.ivmode = IVMODE_PLAIN64;
+	//ctx->data.ivmode = IVMODE_ESSIV;
+	//ctx->data.ivmode = IVMODE_BENBI;
+	ctx->data.ivmode = IVMODE_NULL;
+	//ctx->data.ivmode = IVMODE_LMK;
+	//ctx->data.ivmode = IVMODE_TCW;
+
+	ctx->data.tfms_count = 1;
+	ctx->data.tfms = cc->tfms;
+	ctx->data.iv_size = crypto_skcipher_ivsize(mytfm);
+	ctx->data.ivopts = "sha256";
+	ctx->data.key_size = cc->key_size;
+	ctx->data.key_parts = cc->key_parts;
+	ctx->data.key = cc->key;
+
+	crypto_skcipher_setkey(mytfm, cc->key, cc->key_size);
+
+	init_completion(&result.completion);
+
+	//ctx = (struct geniv_ctx*) (mytfm + 1);
+	ctx = crypto_skcipher_ctx(mytfm);
+
+	size = sizeof(struct skcipher_request);
+	size += crypto_skcipher_reqsize(mytfm);
+
+	printk("BJ:%s:%s:%d: alloc %d bytes\n", __FILE__, __func__, __LINE__, size);
+	req = kzalloc(size, GFP_KERNEL);
+	if (!req) {
+                printk("Could not allocate request queue\n");
+                return ;
+        }
+        skcipher_request_set_tfm(req, mytfm);
+
+        dmreq = get_dmreq(mytfm, req);
+	printk("BJ:%s:%s:%d: req   : %p\n", __FILE__, __func__, __LINE__, req);
+	printk("BJ:%s:%s:%d: dmreq : %p\n", __FILE__, __func__, __LINE__, dmreq);
+
+	dmreq->iv_sector = 999;
+
+	skcipher_request_set_callback(req,
+	    CRYPTO_TFM_REQ_MAY_BACKLOG | CRYPTO_TFM_REQ_MAY_SLEEP,
+	    test_geniv_cb, &result);
+
+	sg_init_one(&sg, scratchpad, 16);
+	skcipher_request_set_crypt(req, &sg, &sg, 16, iv);
+	printk("BJ:%s:%s:%d: BEFORE encryption str = %s\n",
+		__FILE__, __func__, __LINE__, scratchpad);
+	ret = crypto_skcipher_encrypt(req);
+	if (ret == -EINPROGRESS || ret == -EBUSY)
+		wait_for_completion_interruptible(&result.completion);
+	printk("BJ:%s:%s:%d: AFTER  encryption str = %s\n",
+		__FILE__, __func__, __LINE__, scratchpad);
+	skcipher_request_set_crypt(req, &sg, &sg, 16, iv);
+	memcpy(iv, IV_DATA, strlen(IV_DATA));
+	ret = crypto_skcipher_decrypt(req);
+	if (ret == -EINPROGRESS || ret == -EBUSY)
+		wait_for_completion_interruptible(&result.completion);
+	printk("BJ:%s:%s:%d: AFTER  decryption str = %s\n", __FILE__, __func__, __LINE__, scratchpad);
+	kfree(req);
+	printk("BJ:%s:%s:%d: END.....................\n", __FILE__, __func__, __LINE__);
 }
 
 static int crypt_ctr_cipher(struct dm_target *ti,
@@ -1713,6 +1821,14 @@ static int crypt_ctr_cipher(struct dm_target *ti,
 			goto bad;
 		}
 	}
+
+	printk("BJ:%s:%s:%d: cipher    =%s\n", __FILE__, __func__, __LINE__, cc->cipher);
+	printk("BJ:%s:%s:%d: chainmode =%s\n", __FILE__, __func__, __LINE__, chainmode);
+	printk("BJ:%s:%s:%d: ivmode    =%s\n", __FILE__, __func__, __LINE__, ivmode);
+	printk("BJ:%s:%s:%d: IV_size   =%d\n", __FILE__, __func__, __LINE__, cc->iv_size);
+	printk("BJ:%s:%s:%d: ivopts    =%s\n", __FILE__, __func__, __LINE__, ivopts);
+
+	test_geniv(cc);
 
 	ret = 0;
 bad:
@@ -1905,6 +2021,7 @@ static int crypt_map(struct dm_target *ti, struct bio *bio)
 {
 	struct dm_crypt_io *io;
 	struct crypt_config *cc = ti->private;
+	u64 tmp;
 
 	/*
 	 * If bio is REQ_PREFLUSH or REQ_OP_DISCARD, just bypass crypt queues.
@@ -1928,7 +2045,13 @@ static int crypt_map(struct dm_target *ti, struct bio *bio)
 		dm_accept_partial_bio(bio, ((BIO_MAX_PAGES << PAGE_SHIFT) >> SECTOR_SHIFT));
 
 	io = dm_per_bio_data(bio, cc->per_bio_data_size);
-	crypt_io_init(io, cc, bio, dm_target_offset(ti, bio->bi_iter.bi_sector));
+	tmp = dm_target_offset(ti, bio->bi_iter.bi_sector);
+
+	printk("BJ:%s:%s:%d: bi_sector=%lu, bi_size=%u, dm_target_offset=%llu\n", 
+		__FILE__, __func__, __LINE__, bio->bi_iter.bi_sector, bio->bi_iter.bi_size, tmp);
+
+
+	crypt_io_init(io, cc, bio, tmp);
 	io->ctx.req = (struct skcipher_request *)(io + 1);
 
 	if (bio_data_dir(io->base_bio) == READ) {
