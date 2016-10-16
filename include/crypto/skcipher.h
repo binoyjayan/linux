@@ -87,6 +87,7 @@ struct crypto_skcipher {
  *	    length for validity. In case a software fallback was put in place in
  *	    the @cra_init call, this function might need to use the fallback if
  *	    the algorithm doesn't support all of the key sizes.
+ * @setkey: Set context data for the cipher
  * @encrypt: Encrypt a scatterlist of blocks. This function is used to encrypt
  *	     the supplied scatterlist containing the blocks of data. The crypto
  *	     API consumer is responsible for aligning the entries of the
@@ -122,6 +123,8 @@ struct crypto_skcipher {
 struct skcipher_alg {
 	int (*setkey)(struct crypto_skcipher *tfm, const u8 *key,
 	              unsigned int keylen);
+	int (*set_ctx)(struct crypto_skcipher *tfm, void *ctx,
+		       unsigned int len);
 	int (*encrypt)(struct skcipher_request *req);
 	int (*decrypt)(struct skcipher_request *req);
 	int (*init)(struct crypto_skcipher *tfm);
@@ -366,6 +369,21 @@ static inline int crypto_skcipher_setkey(struct crypto_skcipher *tfm,
 {
 	return tfm->setkey(tfm, key, keylen);
 }
+/**
+ * crypto_skcipher_set_ctx() - set initial context for cipher
+ * @tfm: cipher handle
+ * @ctx: buffer holding the context data
+ * @len: length of the context data structure
+ *
+ */
+static inline void crypto_skcipher_set_ctx(struct crypto_skcipher *tfm,
+					 void *ctx, unsigned int len)
+{
+	struct skcipher_alg *alg = crypto_skcipher_alg(tfm);
+
+	alg->set_ctx(tfm, ctx, len);
+}
+
 
 static inline bool crypto_skcipher_has_setkey(struct crypto_skcipher *tfm)
 {
