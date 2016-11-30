@@ -10,7 +10,7 @@
 #ifndef _CRYPTO_GENIV_
 #define _CRYPTO_GENIV_
 
-#define SECTOR_SHIFT            9
+#define SECTOR_SHIFT    9
 
 struct geniv_essiv_private {
 	struct crypto_ahash *hash_tfm;
@@ -56,8 +56,9 @@ struct convert_context {
 
 struct dm_crypt_request {
 	struct convert_context *ctx;
-	struct scatterlist sg_in;
-	struct scatterlist sg_out;
+	unsigned int nents;
+	struct scatterlist *sg_in;
+	struct scatterlist *sg_out;
 	sector_t iv_sector;
 };
 
@@ -70,9 +71,9 @@ struct geniv_operations {
 	int (*init)(struct geniv_ctx_data *cd);
 	int (*wipe)(struct geniv_ctx_data *cd);
 	int (*generator)(struct geniv_ctx_data *req, u8 *iv,
-			 struct dm_crypt_request *dmreq);
+			 struct dm_crypt_request *dmreq, int n);
 	int (*post)(struct geniv_ctx_data *cd, u8 *iv,
-			 struct dm_crypt_request *dmreq);
+		    struct dm_crypt_request *dmreq, int n);
 };
 
 struct geniv_ctx_data {

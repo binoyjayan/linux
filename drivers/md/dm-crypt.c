@@ -254,6 +254,7 @@ static u8 *iv_of_dmreq(struct crypt_config *cc,
 		crypto_skcipher_alignmask(any_tfm(cc)) + 1);
 }
 
+#if 0
 static int crypt_convert_block(struct crypt_config *cc,
 			       struct convert_context *ctx,
 			       struct skcipher_request *req)
@@ -291,6 +292,8 @@ static int crypt_convert_block(struct crypt_config *cc,
 	return r;
 }
 
+#endif
+
 static void kcryptd_async_done(struct crypto_async_request *async_req,
 			       int error);
 
@@ -325,6 +328,7 @@ static void crypt_free_req(struct crypt_config *cc,
 /*
  * Encrypt / decrypt data from one bio to another one (can be the same one)
  */
+#if 0
 static int crypt_convert(struct crypt_config *cc,
 			 struct convert_context *ctx)
 {
@@ -375,6 +379,72 @@ static int crypt_convert(struct crypt_config *cc,
 
 	return 0;
 }
+#endif
+
+/*
+ * Encrypt / decrypt data from one bio to another one (can be the same one)
+ */
+static int crypt_convert_bio(struct crypt_config *cc,
+			     struct convert_context *ctx)
+{
+	int i, r;
+	unsigned int cryptlen;
+	struct skcipher_request *req;
+	struct dm_crypt_request *dmreq;
+	u8 *iv;
+	char *w;
+
+	atomic_set(&ctx->cc_pending, 1);
+
+	crypt_alloc_req(cc, ctx);
+
+	req = ctx->req;
+	dmreq = dmreq_of_req(cc, req);
+	iv = iv_of_dmreq(cc, dmreq);
+
+	// dmreq->iv_sector = ctx->cc_sector;
+	
+	//TODO: Convert to mempool
+	dmreq->nents =  ctx->iter_in.bi_size / (1 << SECTOR_SHIFT);
+	i = ctx->iter_in.bi_size % (1 << SECTOR_SHIFT);
+
+	dmreq->sg_in  = kzalloc(dmreq->nents * sizeof(struct scatterlist), GFP_KERNEL);
+	dmreq->sg_out = kzalloc(dmreq->nents * sizeof(struct scatterlist), GFP_KERNEL);
+
+	dmreq->ctx = ctx;
+
+	sg_init_table(dmreq->sg_in, dmreq->nents);
+	sg_init_table(dmreq->sg_out, dmreq->nents);
+
+	cryptlen = ctx->iter_in.bi_size;
+	w = bio_data_dir(ctx->bio_in) == WRITE ? "WRITE" : "READ";
+	pr_info("BJ:CRYPTO:%s: iv_sector=%d, len=%d\n", w, (int)ctx->cc_sector, cryptlen);
+	for (i = 0; i < dmreq->nents ; i++) {
+		struct bio_vec bv_in = bio_iter_iovec(ctx->bio_in, ctx->iter_in);
+		struct bio_vec bv_out = bio_iter_iovec(ctx->bio_out, ctx->iter_out);
+
+		sg_set_page(&dmreq->sg_in[i], bv_in.bv_page, 1 << SECTOR_SHIFT,
+			    bv_in.bv_offset);
+		sg_set_page(&dmreq->sg_out[i], bv_out.bv_page, 1 << SECTOR_SHIFT,
+			    bv_out.bv_offset);
+
+        	bio_advance_iter(ctx->bio_in, &ctx->iter_in, 1 << SECTOR_SHIFT);
+	        bio_advance_iter(ctx->bio_out, &ctx->iter_out, 1 << SECTOR_SHIFT);
+	}
+
+	skcipher_request_set_crypt(req, dmreq->sg_in, dmreq->sg_out,
+				   cryptlen, iv);
+
+
+	if (bio_data_dir(ctx->bio_in) == WRITE) {
+		r = crypto_skcipher_encrypt(req);
+	} else {
+		r = crypto_skcipher_decrypt(req);
+	}
+
+	return r;
+}
+
 
 static void crypt_free_buffer_pages(struct crypt_config *cc, struct bio *clone);
 
@@ -481,10 +551,16 @@ static void crypt_dec_pending(struct dm_crypt_io *io)
 {
 	struct crypt_config *cc = io->cc;
 	struct bio *base_bio = io->base_bio;
+	struct dm_crypt_request *dmreq;
 	int error = io->error;
 
 	if (!atomic_dec_and_test(&io->io_pending))
 		return;
+
+	// TODO: Convert to mempool
+	dmreq = dmreq_of_req(cc, io->ctx.req);
+	kfree(dmreq->sg_in);
+	kfree(dmreq->sg_out);
 
 	if (io->ctx.req)
 		crypt_free_req(cc, io->ctx.req, base_bio);
@@ -724,7 +800,8 @@ static void kcryptd_crypt_write_convert(struct dm_crypt_io *io)
 	sector += bio_sectors(clone);
 
 	crypt_inc_pending(io);
-	r = crypt_convert(cc, &io->ctx);
+	//r = crypt_convert(cc, &io->ctx);
+	r = crypt_convert_bio(cc, &io->ctx);
 	if (r)
 		io->error = -EIO;
 	crypt_finished = atomic_dec_and_test(&io->ctx.cc_pending);
@@ -754,7 +831,8 @@ static void kcryptd_crypt_read_convert(struct dm_crypt_io *io)
 	crypt_convert_init(cc, &io->ctx, io->base_bio, io->base_bio,
 			   io->sector);
 
-	r = crypt_convert(cc, &io->ctx);
+	r = crypt_convert_bio(cc, &io->ctx);
+
 	if (r < 0)
 		io->error = -EIO;
 
@@ -774,6 +852,9 @@ static void kcryptd_async_done(struct crypto_async_request *async_req,
 
 	if (error < 0)
 		io->error = -EIO;
+	
+	kfree(dmreq->sg_in);
+	kfree(dmreq->sg_out);
 
 	crypt_free_req(cc, req_of_dmreq(cc, dmreq), io->base_bio);
 
@@ -790,10 +871,11 @@ static void kcryptd_crypt(struct work_struct *work)
 {
 	struct dm_crypt_io *io = container_of(work, struct dm_crypt_io, work);
 
-	if (bio_data_dir(io->base_bio) == READ)
+	if (bio_data_dir(io->base_bio) == READ) {
 		kcryptd_crypt_read_convert(io);
-	else
+	} else {
 		kcryptd_crypt_write_convert(io);
+	}
 }
 
 static void kcryptd_queue_crypt(struct dm_crypt_io *io)
@@ -1056,7 +1138,10 @@ static int crypt_ctr_cipher(struct dm_target *ti,
 		goto bad_mem;
 
 create_cipher:
-	/* Call underlying cipher directly if it does not support iv */
+	/* Call underlying cipher directly if it does not support iv
+         * TODO: Use the 'none' iv name; implement a iv with no ops.
+         */
+
 	if (ivmode)
 		ret = snprintf(cipher_api, CRYPTO_MAX_ALG_NAME, "%s(%s(%s))",
 				ivmode, chainmode, cipher);
@@ -1328,8 +1413,9 @@ static int crypt_map(struct dm_target *ti, struct bio *bio)
 	if (bio_data_dir(io->base_bio) == READ) {
 		if (kcryptd_io_read(io, GFP_NOWAIT))
 			kcryptd_queue_read(io);
-	} else
+	} else {
 		kcryptd_queue_crypt(io);
+	}
 
 	return DM_MAPIO_SUBMITTED;
 }

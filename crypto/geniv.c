@@ -35,7 +35,8 @@
 #include <crypto/geniv.h>
 
 struct crypto_geniv_req_ctx {
-	struct skcipher_request subreq CRYPTO_MINALIGN_ATTR;
+	struct skcipher_request *subreq CRYPTO_MINALIGN_ATTR;
+	int n;
 };
 
 static struct crypto_skcipher *any_tfm(struct geniv_ctx_data *cd)
@@ -44,7 +45,7 @@ static struct crypto_skcipher *any_tfm(struct geniv_ctx_data *cd)
 }
 
 static int crypt_iv_plain_gen(struct geniv_ctx_data *cd, u8 *iv,
-			      struct dm_crypt_request *dmreq)
+			      struct dm_crypt_request *dmreq, int n)
 {
 	memset(iv, 0, cd->iv_size);
 	*(__le32 *)iv = cpu_to_le32(dmreq->iv_sector & 0xffffffff);
@@ -53,7 +54,7 @@ static int crypt_iv_plain_gen(struct geniv_ctx_data *cd, u8 *iv,
 }
 
 static int crypt_iv_plain64_gen(struct geniv_ctx_data *cd, u8 *iv,
-				struct dm_crypt_request *dmreq)
+				struct dm_crypt_request *dmreq, int n)
 {
 	memset(iv, 0, cd->iv_size);
 	*(__le64 *)iv = cpu_to_le64(dmreq->iv_sector);
@@ -205,7 +206,7 @@ bad:
 }
 
 static int crypt_iv_essiv_gen(struct geniv_ctx_data *cd, u8 *iv,
-			      struct dm_crypt_request *dmreq)
+			      struct dm_crypt_request *dmreq, int n)
 {
 	struct crypto_cipher *essiv_tfm = cd->iv_private;
 
@@ -241,7 +242,7 @@ static int crypt_iv_benbi_ctr(struct geniv_ctx_data *cd)
 }
 
 static int crypt_iv_benbi_gen(struct geniv_ctx_data *cd, u8 *iv,
-			      struct dm_crypt_request *dmreq)
+			      struct dm_crypt_request *dmreq, int n)
 {
 	__be64 val;
 
@@ -255,7 +256,7 @@ static int crypt_iv_benbi_gen(struct geniv_ctx_data *cd, u8 *iv,
 }
 
 static int crypt_iv_null_gen(struct geniv_ctx_data *cd, u8 *iv,
-			     struct dm_crypt_request *dmreq)
+			     struct dm_crypt_request *dmreq, int n)
 {
 	memset(iv, 0, cd->iv_size);
 
@@ -374,14 +375,14 @@ static int crypt_iv_lmk_one(struct geniv_ctx_data *cd, u8 *iv,
 }
 
 static int crypt_iv_lmk_gen(struct geniv_ctx_data *cd, u8 *iv,
-			      struct dm_crypt_request *dmreq)
+			      struct dm_crypt_request *dmreq, int n)
 {
 	u8 *src;
 	int r = 0;
 
 	if (bio_data_dir(dmreq->ctx->bio_in) == WRITE) {
-		src = kmap_atomic(sg_page(&dmreq->sg_in));
-		r = crypt_iv_lmk_one(cd, iv, dmreq, src + dmreq->sg_in.offset);
+		src = kmap_atomic(sg_page(&dmreq->sg_in[n]));
+		r = crypt_iv_lmk_one(cd, iv, dmreq, src + dmreq->sg_in[n].offset);
 		kunmap_atomic(src);
 	} else
 		memset(iv, 0, cd->iv_size);
@@ -390,7 +391,7 @@ static int crypt_iv_lmk_gen(struct geniv_ctx_data *cd, u8 *iv,
 }
 
 static int crypt_iv_lmk_post(struct geniv_ctx_data *cd, u8 *iv,
-			     struct dm_crypt_request *dmreq)
+			     struct dm_crypt_request *dmreq, int n)
 {
 	u8 *dst;
 	int r;
@@ -398,12 +399,12 @@ static int crypt_iv_lmk_post(struct geniv_ctx_data *cd, u8 *iv,
 	if (bio_data_dir(dmreq->ctx->bio_in) == WRITE)
 		return 0;
 
-	dst = kmap_atomic(sg_page(&dmreq->sg_out));
-	r = crypt_iv_lmk_one(cd, iv, dmreq, dst + dmreq->sg_out.offset);
+	dst = kmap_atomic(sg_page(&dmreq->sg_out[n]));
+	r = crypt_iv_lmk_one(cd, iv, dmreq, dst + dmreq->sg_out[n].offset);
 
 	/* Tweak the first block of plaintext sector */
 	if (!r)
-		crypto_xor(dst + dmreq->sg_out.offset, iv, cd->iv_size);
+		crypto_xor(dst + dmreq->sg_out[n].offset, iv, cd->iv_size);
 
 	kunmap_atomic(dst);
 	return r;
@@ -514,7 +515,7 @@ out:
 }
 
 static int crypt_iv_tcw_gen(struct geniv_ctx_data *cd, u8 *iv,
-			      struct dm_crypt_request *dmreq)
+			      struct dm_crypt_request *dmreq, int n)
 {
 	struct geniv_tcw_private *tcw = &cd->iv_gen_private.tcw;
 	__le64 sector = cpu_to_le64(dmreq->iv_sector);
@@ -523,9 +524,9 @@ static int crypt_iv_tcw_gen(struct geniv_ctx_data *cd, u8 *iv,
 
 	/* Remove whitening from ciphertext */
 	if (bio_data_dir(dmreq->ctx->bio_in) != WRITE) {
-		src = kmap_atomic(sg_page(&dmreq->sg_in));
+		src = kmap_atomic(sg_page(&dmreq->sg_in[n]));
 		r = crypt_iv_tcw_whitening(cd, dmreq,
-					   src + dmreq->sg_in.offset);
+					   src + dmreq->sg_in[n].offset);
 		kunmap_atomic(src);
 	}
 
@@ -539,7 +540,7 @@ static int crypt_iv_tcw_gen(struct geniv_ctx_data *cd, u8 *iv,
 }
 
 static int crypt_iv_tcw_post(struct geniv_ctx_data *cd, u8 *iv,
-			     struct dm_crypt_request *dmreq)
+			     struct dm_crypt_request *dmreq, int n)
 {
 	u8 *dst;
 	int r;
@@ -548,8 +549,8 @@ static int crypt_iv_tcw_post(struct geniv_ctx_data *cd, u8 *iv,
 		return 0;
 
 	/* Apply whitening on ciphertext */
-	dst = kmap_atomic(sg_page(&dmreq->sg_out));
-	r = crypt_iv_tcw_whitening(cd, dmreq, dst + dmreq->sg_out.offset);
+	dst = kmap_atomic(sg_page(&dmreq->sg_out[n]));
+	r = crypt_iv_tcw_whitening(cd, dmreq, dst + dmreq->sg_out[n].offset);
 	kunmap_atomic(dst);
 
 	return r;
@@ -734,7 +735,7 @@ static void geniv_async_done(struct crypto_async_request *async_req, int error)
 	unsigned long align = crypto_skcipher_alignmask(tfm);
 	struct crypto_geniv_req_ctx *rctx =
 		(void *) PTR_ALIGN((u8 *)skcipher_request_ctx(req), align + 1);
-	struct skcipher_request *subreq = &rctx->subreq;
+	struct skcipher_request *subreq = rctx->subreq + rctx->n;
 
 	/*
 	 * A request from crypto driver backlog is going to be processed now,
@@ -747,11 +748,17 @@ static void geniv_async_done(struct crypto_async_request *async_req, int error)
 	}
 
 	if (!error && cd->iv_gen_ops && cd->iv_gen_ops->post)
-		error = cd->iv_gen_ops->post(cd, req->iv, dmreq);
+		error = cd->iv_gen_ops->post(cd, req->iv, dmreq, rctx->n);
 
 	skcipher_request_set_callback(subreq, req->base.flags,
 				      req->base.complete, req->base.data);
 	skcipher_request_complete(req, error);
+
+	pr_info("BJ: cc_pending=%d [Free when it is 1]\n", atomic_read(&cctx->cc_pending));
+	if (atomic_read(&cctx->cc_pending) == 1) {
+		pr_info("BJ: Freeing subreq...\n");
+		kfree(subreq);
+	}
 }
 
 static inline int crypto_geniv_crypt(struct skcipher_request *req, bool encrypt)
@@ -761,36 +768,98 @@ static inline int crypto_geniv_crypt(struct skcipher_request *req, bool encrypt)
 	struct geniv_ctx_data *cd = &ctx->data;
 	struct crypto_skcipher *child = ctx->child;
 	struct dm_crypt_request *dmreq;
+	struct convert_context *cctx;
 	unsigned long align = crypto_skcipher_alignmask(tfm);
 	struct crypto_geniv_req_ctx *rctx =
 		(void *) PTR_ALIGN((u8 *)skcipher_request_ctx(req), align + 1);
-	struct skcipher_request *subreq = &rctx->subreq;
-	int ret = 0;
+	struct skcipher_request *subreq = rctx->subreq;
+	int i, bytes, cryptlen, ret = 0;
 	u8 *iv = req->iv;
+	char *w;
 
 	dmreq = dmreq_of_req(tfm, req);
+	cctx = dmreq->ctx;
+	cryptlen = req->cryptlen;
 
-	if (cd->iv_gen_ops)
-		ret = cd->iv_gen_ops->generator(cd, iv, dmreq);
+	w = bio_data_dir(cctx->bio_in) == WRITE ? "WRITE" : "READ";
 
-	if (ret < 0) {
-		pr_err("Error in generating IV ret: %d\n", ret);
-		goto end;
+	subreq = kzalloc(dmreq->nents * sizeof(struct skcipher_request), GFP_KERNEL);
+
+	for (i = 0; i < dmreq->nents; i++) {
+
+		atomic_inc(&cctx->cc_pending);
+
+		dmreq->iv_sector = cctx->cc_sector;
+		pr_info("BJ:CRYPTO:%s: iv_sector=%d, len=%d\n", w, (int)cctx->cc_sector,
+			cryptlen);
+		if (cd->iv_gen_ops)
+			ret = cd->iv_gen_ops->generator(cd, iv, dmreq, i);
+
+		if (ret < 0) {
+			pr_err("Error in generating IV ret: %d\n", ret);
+			goto end;
+		}
+
+		rctx->n = i;
+		skcipher_request_set_tfm(subreq + i, child);
+		skcipher_request_set_callback(subreq + i, req->base.flags,
+					      geniv_async_done, rctx);
+		bytes = cryptlen < (1 << SECTOR_SHIFT)? cryptlen:(1 << SECTOR_SHIFT);
+		skcipher_request_set_crypt(subreq + i, &req->src[i],
+					   &req->dst[i], bytes, iv);
+		cryptlen -= bytes;
+
+		if (encrypt)
+			ret = crypto_skcipher_encrypt(subreq + i);
+		else
+			ret = crypto_skcipher_decrypt(subreq + i);
+
+		if (!ret && cd->iv_gen_ops && cd->iv_gen_ops->post) {
+			ret = cd->iv_gen_ops->post(cd, iv, dmreq, i);
+		}
+
+		switch (ret) {
+		/*
+		 * The request was queued by a crypto driver
+		 * but the driver request queue is full, let's wait.
+		 */
+		case -EBUSY:
+			wait_for_completion(&cctx->restart);
+			reinit_completion(&cctx->restart);
+			/* fall through */
+		/*
+		 * The request is queued and processed asynchronously,
+		 * completion function kcryptd_async_done() will be called.
+		 */
+		case -EINPROGRESS:
+			cctx->req = NULL;
+			cctx->cc_sector++;
+			cond_resched();
+			break;
+		/*
+		 * The request was already processed (synchronously).
+		 */
+		case 0:
+			atomic_dec(&cctx->cc_pending);
+			cctx->cc_sector++;
+			cond_resched();
+			continue;
+
+		/* There was an error while processing the request. */
+		default:
+			atomic_dec(&cctx->cc_pending);
+			return ret;
+		}
+
+		if (ret)
+			break;
 	}
 
-	skcipher_request_set_tfm(subreq, child);
-	skcipher_request_set_callback(subreq, req->base.flags,
-				      geniv_async_done, req);
-	skcipher_request_set_crypt(subreq, req->src, req->dst,
-				   req->cryptlen, iv);
-
-	if (encrypt)
-		ret = crypto_skcipher_encrypt(subreq);
-	else
-		ret = crypto_skcipher_decrypt(subreq);
-
-	if (!ret && cd->iv_gen_ops && cd->iv_gen_ops->post)
-		ret = cd->iv_gen_ops->post(cd, iv, dmreq);
+	pr_info("BJ: cc_pending = %d [Free when it is 1]\n", atomic_read(&cctx->cc_pending));
+	if (atomic_read(&cctx->cc_pending) == 1) {
+		pr_info("BJ: Freeing subreq...\n");
+		kfree(subreq);
+	}
 
 end:
 	return ret;

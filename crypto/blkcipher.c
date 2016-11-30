@@ -120,7 +120,9 @@ int blkcipher_walk_done(struct blkcipher_desc *desc,
 		err = 0;
 	}
 
+	// pr_info("BJ:%s +%d:%s: CALLING scatterwalk_done(in,  0, %d)\n", __FILE__, __LINE__, __func__, nbytes);
 	scatterwalk_done(&walk->in, 0, nbytes);
+	// pr_info("BJ:%s +%d:%s: CALLING scatterwalk_done(out,  1, %d)\n", __FILE__, __LINE__, __func__, nbytes);
 	scatterwalk_done(&walk->out, 1, nbytes);
 
 err:
