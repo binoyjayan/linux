@@ -549,7 +549,24 @@ int arch_add_memory(int nid, u64 start, u64 size, bool for_device)
 	struct zone *zone;
 	unsigned long start_pfn = start >> PAGE_SHIFT;
 	unsigned long nr_pages = size >> PAGE_SHIFT;
+	unsigned long end_pfn = start_pfn + nr_pages;
+	unsigned long max_sparsemem_pfn = 1UL << (MAX_PHYSMEM_BITS-PAGE_SHIFT);
+	unsigned long pfn;
 	int ret;
+
+	if (end_pfn > max_sparsemem_pfn) {
+		pr_err("end_pfn too big");
+		return -1;
+	}
+	hotplug_paging(start, size);
+
+	/*
+	 * Mark all the page range as unsuable.
+	 * This is needed because  __add_section (within __add_pages)
+	 * wants pfn_valid to be false, and in arm64 pfn falid is implemented
+	 * by just checking at the nomap flag for existing blocks
+	 */
+	memblock_mark_nomap(start, size);
 
 	pgdat = NODE_DATA(nid);
 
@@ -557,28 +574,34 @@ int arch_add_memory(int nid, u64 start, u64 size, bool for_device)
 		zone_for_memory(nid, start, size, ZONE_NORMAL, for_device);
 	ret = __add_pages(nid, zone, start_pfn, nr_pages);
 
+	/*
+	 * Make the pages usable after they have been added.
+	 * This will make pfn_valid return true
+	 */
+	memblock_clear_nomap(start, size);
+
+	/*
+	 * This is a hack to avoid having to mix arch specific code into arch
+	 * independent code. SetPageReserved is supposed to be called by __add_zone
+	 * (within __add_section, within __add_pages). However, when it is called
+	 * there, it assumes that pfn_valid returns true.  For the way pfn_valid is
+	 * implemented in arm64 (a check on the nomap flag), the only way to make
+	 * this evaluate true inside __add_zone is to clear the nomap flags of
+	 * blocks in architecture independent code.
+	 *
+	 * To avoid this, we set the Reserved flag here after we cleared the nomap
+	 * flag in the line above.
+	 */
+	for (pfn = start_pfn; pfn < start_pfn + nr_pages; pfn++) {
+		if (!pfn_valid(pfn))
+			continue;
+		SetPageReserved(pfn_to_page(pfn));
+	}
+
 	if (ret)
 		pr_warn("%s: Problem encountered in __add_pages() ret=%d\n",
 			__func__, ret);
 
 	return ret;
 }
-
-#ifdef CONFIG_MEMORY_HOTREMOVE
-int arch_remove_memory(u64 start, u64 size)
-{
-	unsigned long start_pfn = start >> PAGE_SHIFT;
-	unsigned long nr_pages = size >> PAGE_SHIFT;
-	struct zone *zone;
-	int ret;
-
-	zone = page_zone(pfn_to_page(start_pfn));
-	ret = __remove_pages(zone, start_pfn, nr_pages);
-	if (ret)
-		pr_warn("%s: Problem encountered in __remove_pages() ret=%d\n",
-			__func__, ret);
-
-	return ret;
-}
-#endif
 #endif
