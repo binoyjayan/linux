@@ -1,0 +1,23 @@
+Arm TrustZone CryptoCell cryptographic accelerators
+
+Required properties:
+- compatible: Should be "arm,cc7x".
+- reg: Address and length of the register set for the device.
+- interrupts: Should contain the single interrupt specifier.
+
+Optional properties:
+- interrupt-parent: should designate the interrupt controller the device
+  is routed to, unless the property is inherited.
+- clocks: the clock used by the core.
+- power-domains: Must contain a reference to the PM domain.
+
+
+Example:
+
+	arm_cc7x: arm_cc7x@80000000 {
+		compatible = "arm,cc7x";
+		interrupt-parent = <&intc>;
+		interrupts = < 0 30 4 >;
+		reg = < 0x80000000 0x10000 >;
+	};
+
