@@ -1555,7 +1555,8 @@ static int __init geniv_register_algs(void)
 	if (err)
 		goto out_undo_plain;
 
-	err = crypto_register_template(&crypto_essiv_tmpl);
+	err = 0;
+	// err = crypto_register_template(&crypto_essiv_tmpl);
 	if (err)
 		goto out_undo_plain64;
 
@@ -1594,7 +1595,7 @@ static void __exit geniv_deregister_algs(void)
 {
 	crypto_unregister_template(&crypto_plain_tmpl);
 	crypto_unregister_template(&crypto_plain64_tmpl);
-	crypto_unregister_template(&crypto_essiv_tmpl);
+	// crypto_unregister_template(&crypto_essiv_tmpl);
 	crypto_unregister_template(&crypto_benbi_tmpl);
 	crypto_unregister_template(&crypto_null_tmpl);
 	crypto_unregister_template(&crypto_lmk_tmpl);
