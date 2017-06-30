@@ -492,8 +492,11 @@ int walk_system_ram_range(unsigned long start_pfn, unsigned long nr_pages,
 		(find_next_iomem_res(&res, IORES_DESC_NONE, true) >= 0)) {
 		pfn = (res.start + PAGE_SIZE - 1) >> PAGE_SHIFT;
 		end_pfn = (res.end + 1) >> PAGE_SHIFT;
-		if (end_pfn > pfn)
+		if (end_pfn > pfn) {
+			pr_info("spfn:%lu epfn:%lu\n", pfn, end_pfn);
 			ret = (*func)(pfn, end_pfn - pfn, arg);
+			pr_info("done diff:%lu\n", end_pfn - pfn);
+		}
 		if (ret)
 			break;
 		res.start = res.end + 1;

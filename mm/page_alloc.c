@@ -101,6 +101,8 @@ volatile unsigned long latent_entropy __latent_entropy;
 EXPORT_SYMBOL(latent_entropy);
 #endif
 
+extern int printme;
+
 /*
  * Array of node states.
  */
@@ -808,7 +810,9 @@ static inline void __free_one_page(struct page *page,
 
 continue_merging:
 	while (order < max_order - 1) {
+		if (printme) pr_info("fpb %d\n", __LINE__);
 		buddy_pfn = __find_buddy_pfn(pfn, order);
+		if (printme) pr_info("fpb %d\n", __LINE__);
 		buddy = page + (buddy_pfn - pfn);
 
 		if (!pfn_valid_within(buddy_pfn))
@@ -857,6 +861,7 @@ continue_merging:
 	}
 
 done_merging:
+	if (printme) pr_info("fpb %d\n", __LINE__);
 	set_page_order(page, order);
 
 	/*
@@ -883,6 +888,7 @@ done_merging:
 
 	list_add(&page->lru, &zone->free_area[order].free_list[migratetype]);
 out:
+	if (printme) pr_info("fpb %d\n", __LINE__);
 	zone->free_area[order].nr_free++;
 }
 
@@ -2488,16 +2494,21 @@ void free_hot_cold_page(struct page *page, bool cold)
 	unsigned long pfn = page_to_pfn(page);
 	int migratetype;
 
+	if (printme) pr_info("fhcp %d\n", __LINE__);
 	if (in_interrupt()) {
 		__free_pages_ok(page, 0);
 		return;
 	}
 
+	if (printme) pr_info("fhcp %d\n", __LINE__);
 	if (!free_pcp_prepare(page))
 		return;
 
+	if (printme) pr_info("fhcp %d\n", __LINE__);
 	migratetype = get_pfnblock_migratetype(page, pfn);
+	if (printme) pr_info("fhcp %d\n", __LINE__);
 	set_pcppage_migratetype(page, migratetype);
+	if (printme) pr_info("fhcp %d\n", __LINE__);
 	preempt_disable();
 
 	/*
@@ -2529,6 +2540,7 @@ void free_hot_cold_page(struct page *page, bool cold)
 	}
 
 out:
+	if (printme) pr_info("fhcp %d\n", __LINE__);
 	preempt_enable();
 }
 

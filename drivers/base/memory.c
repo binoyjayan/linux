@@ -25,6 +25,8 @@
 #include <linux/atomic.h>
 #include <linux/uaccess.h>
 
+extern int printme;
+
 static DEFINE_MUTEX(mem_sysfs_mutex);
 
 #define MEMORY_CLASS_NAME	"memory"
@@ -173,6 +175,7 @@ static ssize_t show_mem_state(struct device *dev,
 
 int memory_notify(unsigned long val, void *v)
 {
+	if (printme) pr_info("%s:%d:\n", __FUNCTION__, __LINE__);
 	return blocking_notifier_call_chain(&memory_chain, val, v);
 }
 

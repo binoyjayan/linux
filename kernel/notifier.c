@@ -6,6 +6,8 @@
 #include <linux/vmalloc.h>
 #include <linux/reboot.h>
 
+extern int printme;
+
 /*
  *	Notifier list for kernel code which wants to be called
  *	at shutdown. This is used to stop any idling DMA operations
@@ -77,11 +79,14 @@ static int notifier_call_chain(struct notifier_block **nl,
 {
 	int ret = NOTIFY_DONE;
 	struct notifier_block *nb, *next_nb;
+	if (printme) pr_info("%s:%d: call rcu_dereference_raw\n", __FUNCTION__, __LINE__);
 
 	nb = rcu_dereference_raw(*nl);
+	if (printme) pr_info("%s:%d: nb = %p\n", __FUNCTION__, __LINE__, nb);
 
 	while (nb && nr_to_call) {
 		next_nb = rcu_dereference_raw(nb->next);
+		if (printme) pr_info("%s:%d: next_nb = %p\n", __FUNCTION__, __LINE__, next_nb);
 
 #ifdef CONFIG_DEBUG_NOTIFIERS
 		if (unlikely(!func_ptr_is_kernel_text(nb->notifier_call))) {
@@ -91,15 +96,26 @@ static int notifier_call_chain(struct notifier_block **nl,
 		}
 #endif
 		ret = nb->notifier_call(nb, val, v);
+		if (printme) pr_info("%s:%d: ret = %d nr_calls=%d nr_to_call=%d\n", __FUNCTION__, __LINE__, ret, *nr_calls, nr_to_call);
 
-		if (nr_calls)
+		if (nr_calls) {
 			(*nr_calls)++;
+			if (printme) pr_info("%s:%d: ret = %d nr_calls=%d nr_to_call=%d\n", __FUNCTION__, __LINE__, ret, *nr_calls, nr_to_call);
+		} else
+			if (printme) pr_info("%s:%d: ret = %d nr_to_call=%d\n", __FUNCTION__, __LINE__, ret, nr_to_call);
 
 		if (ret & NOTIFY_STOP_MASK)
 			break;
 		nb = next_nb;
 		nr_to_call--;
 	}
+
+	if (printme) {
+		pr_info("%s:%d: ret = %d\n", __FUNCTION__, __LINE__, ret);
+		printme++;
+		if (printme > 100) printme = 0;
+	}
+
 	return ret;
 }
 NOKPROBE_SYMBOL(notifier_call_chain);
@@ -306,6 +322,8 @@ int __blocking_notifier_call_chain(struct blocking_notifier_head *nh,
 				   int nr_to_call, int *nr_calls)
 {
 	int ret = NOTIFY_DONE;
+	if (printme) pr_info("%s:%d:\n", __FUNCTION__, __LINE__);
+
 
 	/*
 	 * We check the head outside the lock, but if this access is
@@ -325,6 +343,7 @@ EXPORT_SYMBOL_GPL(__blocking_notifier_call_chain);
 int blocking_notifier_call_chain(struct blocking_notifier_head *nh,
 		unsigned long val, void *v)
 {
+	if (printme) pr_info("%s:%d:\n", __FUNCTION__, __LINE__);
 	return __blocking_notifier_call_chain(nh, val, v, -1, NULL);
 }
 EXPORT_SYMBOL_GPL(blocking_notifier_call_chain);

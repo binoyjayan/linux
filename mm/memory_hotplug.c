@@ -40,6 +40,9 @@
 
 #include "internal.h"
 
+int printme;
+EXPORT_SYMBOL(printme);
+
 /*
  * online_page_callback contains pointer to current page onlining function.
  * Initially it is generic_online_page(). If it is required it could be
@@ -928,9 +931,14 @@ EXPORT_SYMBOL_GPL(__online_page_free);
 
 static void generic_online_page(struct page *page)
 {
+	if (printme)
+		pr_info("%s pfn %lu resvd %d mcnt %d\n", __FUNCTION__, page_to_pfn(page), PageReserved(page), atomic_read(&page->_mapcount));
+
 	__online_page_set_limits(page);
 	__online_page_increment_counters(page);
+	if (printme) pr_info("%s %d\n", __FUNCTION__, __LINE__);
 	__online_page_free(page);
+	if (printme) pr_info("%s pfn %lu resvd %d mcnt %d\n", __FUNCTION__, page_to_pfn(page), PageReserved(page), atomic_read(&page->_mapcount));
 }
 
 static int online_pages_range(unsigned long start_pfn, unsigned long nr_pages,
@@ -939,12 +947,20 @@ static int online_pages_range(unsigned long start_pfn, unsigned long nr_pages,
 	unsigned long i;
 	unsigned long onlined_pages = *(unsigned long *)arg;
 	struct page *page;
+
+	pr_info("%s %d - begin\n", __FUNCTION__, __LINE__);
+	printme = 0;
 	if (PageReserved(pfn_to_page(start_pfn)))
 		for (i = 0; i < nr_pages; i++) {
+			if (printme) pr_info("opr:%d [%lu] onlined_pages=%lu\n", __LINE__, i, onlined_pages);
 			page = pfn_to_page(start_pfn + i);
 			(*online_page_callback)(page);
 			onlined_pages++;
+			if (onlined_pages >= 262140)
+				printme = 1;
+			if (printme) pr_info("opr:[%lu] ++=%lu\n", i, onlined_pages);
 		}
+	pr_info("%s %d - end. onlined_pages=%lu\n", __FUNCTION__, __LINE__, onlined_pages);
 	*(unsigned long *)arg = onlined_pages;
 	return 0;
 }
@@ -1115,9 +1131,11 @@ int __ref online_pages(unsigned long pfn, unsigned long nr_pages, int online_typ
 	arg.nr_pages = nr_pages;
 	node_states_check_changes_online(nr_pages, zone, &arg);
 
+	pr_info("%s %d\n", __FUNCTION__, __LINE__);
 	nid = zone_to_nid(zone);
 
 	ret = memory_notify(MEM_GOING_ONLINE, &arg);
+	pr_info("%s %d\n", __FUNCTION__, __LINE__);
 	ret = notifier_to_errno(ret);
 	if (ret)
 		goto failed_addition;
@@ -1133,8 +1151,10 @@ int __ref online_pages(unsigned long pfn, unsigned long nr_pages, int online_typ
 		build_all_zonelists(NULL, zone);
 	}
 
+	pr_info("%s %d BEFORE WALK\n", __FUNCTION__, __LINE__);
 	ret = walk_system_ram_range(pfn, nr_pages, &onlined_pages,
 		online_pages_range);
+	pr_info("%s %d AFTER  WALK\n", __FUNCTION__, __LINE__);
 	if (ret) {
 		if (need_zonelists_rebuild)
 			zone_pcp_reset(zone);
@@ -1158,7 +1178,9 @@ int __ref online_pages(unsigned long pfn, unsigned long nr_pages, int online_typ
 
 	mutex_unlock(&zonelists_mutex);
 
+	pr_info("%s %d BEFORE MARK\n", __FUNCTION__, __LINE__);
 	init_per_zone_wmark_min();
+	pr_info("%s %d AFTER  MARK\n", __FUNCTION__, __LINE__);
 
 	if (onlined_pages) {
 		kswapd_run(nid);
@@ -1167,14 +1189,18 @@ int __ref online_pages(unsigned long pfn, unsigned long nr_pages, int online_typ
 
 	vm_total_pages = nr_free_pagecache_pages();
 
+	pr_info("%s:%d: call writeback_set_ratelimit\n", __FUNCTION__, __LINE__);
 	writeback_set_ratelimit();
 
-	if (onlined_pages)
+	if (onlined_pages) {
+		pr_info("%s:%d: call memory_notify\n", __FUNCTION__, __LINE__);
 		memory_notify(MEM_ONLINE, &arg);
+	}
+	pr_info("%s:%d: ret 0\n", __FUNCTION__, __LINE__);
 	return 0;
 
 failed_addition:
-	pr_debug("online_pages [mem %#010llx-%#010llx] failed\n",
+	pr_info("online_pages [mem %#010llx-%#010llx] failed\n",
 		 (unsigned long long) pfn << PAGE_SHIFT,
 		 (((unsigned long long) pfn + nr_pages) << PAGE_SHIFT) - 1);
 	memory_notify(MEM_CANCEL_ONLINE, &arg);
